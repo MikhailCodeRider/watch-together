@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Watch Together</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* ── ADMIN ── */
+#admin {
+  background: #0d0d14;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Segoe UI', sans-serif;
+  color: #eee;
+}
+.card {
+  background: #16161f;
+  border: 1px solid #222;
+  border-radius: 16px;
+  padding: 40px;
+  width: 100%;
+  max-width: 520px;
+}
+.card h1 { font-size: 1.4rem; margin-bottom: 4px; }
+.card p  { color: #666; font-size: 0.88rem; margin-bottom: 32px; }
+label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 6px; text-transform: uppercase; letter-spacing: .05em; }
+input[type="url"], input[type="time"] {
+  width: 100%;
+  background: #0d0d14;
+  border: 1px solid #2a2a3a;
+  color: #fff;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 1rem;
+  outline: none;
+  margin-bottom: 20px;
+  transition: border .2s;
+}
+input:focus { border-color: #5b6af0; }
+.gen-btn {
+  width: 100%;
+  background: #5b6af0;
+  color: #fff;
+  border: none;
+  padding: 14px;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background .2s;
+}
+.gen-btn:hover { background: #4a58d8; }
+.output { margin-top: 28px; display: none; }
+.output-title { font-size: 0.8rem; color: #888; margin-bottom: 10px; text-transform: uppercase; letter-spacing: .05em; }
+.btns { display: flex; gap: 10px; }
+.btn-dl, .btn-preview {
+  flex: 1;
+  padding: 12px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  text-align: center;
+  text-decoration: none;
+  display: inline-block;
+}
+.btn-dl      { background: #1a2e1a; color: #4ade80; border: 1px solid #2a4a2a; }
+.btn-preview { background: #1a1a2e; color: #818cf8; border: 1px solid #2a2a4a; }
+.btn-dl:hover      { background: #1e3a1e; }
+.btn-preview:hover { background: #1e1e3a; }
+
+/* ── VIEWER ── */
+#viewer {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: #000;
+  flex-direction: column;
+}
+#viewer video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+#overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.92);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  font-family: 'Segoe UI', sans-serif;
+  color: #fff;
+  transition: opacity .6s;
+  z-index: 10;
+}
+#overlay.fade { opacity: 0; pointer-events: none; }
+.ov-title { font-size: 1.1rem; color: #888; }
+#pause-btn {
+  position: fixed;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,.6);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,.2);
+  padding: 12px 36px;
+  border-radius: 40px;
+  font-size: 1rem;
+  cursor: pointer;
+  z-index: 20;
+  backdrop-filter: blur(6px);
+  display: none;
+  transition: opacity .3s;
+}
+#pause-btn:hover { background: rgba(255,255,255,.15); }
+#timer {
+  font-size: clamp(4rem, 15vw, 8rem);
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 4px;
+  line-height: 1;
+}
+#timer.red { color: #f87171; }
+.ov-hint { font-size: 0.82rem; color: #444; }
+</style>
+</head>
+<body>
+
+<!-- ADMIN -->
+<div id="admin">
+  <div class="card">
+    <h1>🎬 Watch Together</h1>
+    <p>Генератор синхронного просмотра</p>
+
+    <label>Ссылка на видео (прямой MP4 / M3U8)</label>
+    <input type="url" id="url" placeholder="https://…/film.mp4" />
+
+    <label>Время старта</label>
+    <input type="time" id="time" value="20:55" />
+
+    <button class="gen-btn" onclick="generate()">Сгенерировать →</button>
+
+    <div class="output" id="output">
+      <div class="output-title">Готово — отправь другу</div>
+      <div class="btns">
+        <a class="btn-dl" id="dl-link" download="watch.html">⬇ Скачать HTML</a>
+        <a class="btn-preview" id="preview-link" target="_blank">👁 Открыть у себя</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- VIEWER (hidden in admin mode) -->
+<div id="viewer">
+  <video id="vid" preload="auto" playsinline></video>
+  <button id="pause-btn" onclick="togglePause()">⏸ Пауза</button>
+  <div id="overlay" onclick="unlock()">
+    <div class="ov-title" id="ov-title">Синхронный просмотр</div>
+    <div id="timer">--:--</div>
+    <div class="ov-hint" id="ov-hint">Нажми в любом месте чтобы разрешить воспроизведение</div>
+  </div>
+</div>
+
+<script>
+// ─── VIEWER LOGIC ─────────────────────────────────────────────────────────────
+const params = new URLSearchParams(location.search);
+const vidUrl  = params.get('url');
+const timeStr = params.get('t');
+
+if (vidUrl && timeStr) {
+  document.getElementById('admin').style.display = 'none';
+  document.getElementById('viewer').style.display = 'flex';
+
+  const [TH, TM] = timeStr.split(':').map(Number);
+  const vid = document.getElementById('vid');
+  const timer = document.getElementById('timer');
+  const overlay = document.getElementById('overlay');
+  const readyBtn = document.getElementById('ready-btn');
+  const hint = document.getElementById('ov-hint');
+
+  vid.src = vidUrl;
+  vid.load();
+
+  let unlocked = false;
+  let fired = false;
+
+  const hint = document.getElementById('ov-hint');
+
+  vid.addEventListener('canplay', () => {
+    if (!unlocked) hint.textContent = 'Нажми в любом месте чтобы разрешить воспроизведение';
+  }, { once: true });
+
+  function unlock() {
+    if (unlocked) return;
+    unlocked = true;
+    hint.textContent = 'Готово — жду старта';
+    // silent play+pause to satisfy autoplay policy
+    vid.play().then(() => vid.pause()).catch(() => {});
+  }
+  window.unlock = unlock;
+
+  function tick() {
+    if (fired) return;
+    const now = new Date();
+    const target = new Date(now);
+    target.setHours(TH, TM, 0, 0);
+    const diff = Math.ceil((target - now) / 1000);
+
+    if (diff <= 0) {
+      fired = true;
+      timer.textContent = '🎬';
+      document.getElementById('ov-title').textContent = 'Поехали!';
+      vid.play().catch(() => {});
+      setTimeout(() => { overlay.classList.add('fade'); }, 600);
+      setTimeout(() => {
+        overlay.style.display = 'none';
+        document.getElementById('pause-btn').style.display = 'block';
+      }, 1200);
+      return;
+    }
+
+    const h = Math.floor(diff / 3600);
+    const m = Math.floor((diff % 3600) / 60);
+    const s = diff % 60;
+    timer.textContent = h > 0
+      ? `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
+      : `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+
+    timer.classList.toggle('red', diff <= 10);
+
+    if (!unlocked && diff <= 60) {
+      hint.style.color = '#f87171';
+      hint.textContent = '⚠ Нажми на экран чтобы разрешить воспроизведение';
+    }
+
+    setTimeout(tick, 500);
+  }
+  tick();
+
+  function togglePause() {
+    const btn = document.getElementById('pause-btn');
+    if (vid.paused) {
+      vid.play();
+      btn.textContent = '⏸ Пауза';
+    } else {
+      vid.pause();
+      btn.textContent = '▶ Продолжить';
+    }
+  }
+  window.togglePause = togglePause;
+}
+
+// ─── ADMIN LOGIC ──────────────────────────────────────────────────────────────
+function generate() {
+  const url  = document.getElementById('url').value.trim();
+  const time = document.getElementById('time').value;
+  if (!url || !time) { alert('Заполни URL и время'); return; }
+
+  const viewerUrl = location.href.split('?')[0] + `?url=${encodeURIComponent(url)}&t=${time}`;
+
+  // Standalone HTML for download (no server needed)
+  const html = buildViewer(url, time);
+  const blob = new Blob([html], { type: 'text/html' });
+  const blobUrl = URL.createObjectURL(blob);
+
+  document.getElementById('dl-link').href = blobUrl;
+  document.getElementById('preview-link').href = viewerUrl;
+  document.getElementById('output').style.display = 'block';
+}
+
+function buildViewer(url, time) {
+  const [h, m] = time.split(':');
+  return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Watch Together — ${time}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#000;display:flex;align-items:center;justify-content:center;height:100vh;overflow:hidden;font-family:'Segoe UI',sans-serif;color:#fff}
+video{width:100%;height:100%;object-fit:contain;position:fixed;inset:0}
+#ov{position:fixed;inset:0;background:rgba(0,0,0,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;z-index:10;transition:opacity .6s}
+#ov.fade{opacity:0;pointer-events:none}
+.ov-sub{font-size:1rem;color:#777}
+#tmr{font-size:clamp(4rem,15vw,8rem);font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:4px;line-height:1}
+#tmr.red{color:#f87171}
+.hint{font-size:.8rem;color:#444}
+#pb{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6);color:#fff;border:1px solid rgba(255,255,255,.2);padding:12px 36px;border-radius:40px;font-size:1rem;cursor:pointer;z-index:20;backdrop-filter:blur(6px);display:none}
+#pb:hover{background:rgba(255,255,255,.15)}
+</style>
+</head>
+<body>
+<video id="v" preload="auto" playsinline src="${url}"></video>
+<button id="pb" onclick="tp()">⏸ Пауза</button>
+<div id="ov" onclick="unlock()">
+  <div class="ov-sub">Синхронный просмотр · старт в ${time}</div>
+  <div id="tmr">--:--</div>
+  <div class="hint" id="hint">Нажми в любом месте чтобы разрешить воспроизведение</div>
+</div>
+<script>
+var TH=${h},TM=${m},v=document.getElementById('v'),tmr=document.getElementById('tmr'),
+    ov=document.getElementById('ov'),hint=document.getElementById('hint'),
+    unlocked=false,fired=false;
+v.load();
+function unlock(){if(unlocked)return;unlocked=true;hint.textContent='Готово — жду старта';hint.style.color='';v.play().then(function(){v.pause();}).catch(function(){});}
+function tick(){if(fired)return;
+  var now=new Date(),t=new Date(now);t.setHours(TH,TM,0,0);
+  var d=Math.ceil((t-now)/1000);
+  if(d<=0){fired=true;tmr.textContent='🎬';v.play().catch(function(){});
+    setTimeout(function(){ov.classList.add('fade');},600);
+    setTimeout(function(){ov.style.display='none';document.getElementById('pb').style.display='block';},1200);return;}
+  var hh=Math.floor(d/3600),mm=Math.floor((d%3600)/60),ss=d%60;
+  tmr.textContent=hh>0?p(hh)+':'+p(mm)+':'+p(ss):p(mm)+':'+p(ss);
+  tmr.classList.toggle('red',d<=10);
+  if(!unlocked&&d<=60){hint.style.color='#f87171';hint.textContent='⚠ Нажми на экран!';}
+  setTimeout(tick,500);}
+function p(n){return('0'+n).slice(-2);}
+function tp(){var pb=document.getElementById('pb');if(v.paused){v.play();pb.textContent='⏸ Пауза';}else{v.pause();pb.textContent='▶ Продолжить';}}
+tick();
+<\/script>
+</body>
+</html>`;
+}
+</script>
+</body>
+</html>
