@@ -192,8 +192,6 @@ if (vidUrl && timeStr) {
   let unlocked = false;
   let fired = false;
 
-  const hint = document.getElementById('ov-hint');
-
   vid.addEventListener('canplay', () => {
     if (!unlocked) hint.textContent = 'Нажми в любом месте чтобы разрешить воспроизведение';
   }, { once: true });
