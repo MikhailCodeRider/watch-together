@@ -103,25 +103,28 @@ input:focus { border-color: #5b6af0; }
 }
 #overlay.fade { opacity: 0; pointer-events: none; }
 .ov-title { font-size: 1.1rem; color: #888; }
-#pause-btn {
+#controls {
   position: fixed;
   bottom: 28px;
   left: 50%;
   transform: translateX(-50%);
+  display: none;
+  gap: 12px;
+  z-index: 20;
+  transition: opacity .3s;
+}
+#controls.hidden { opacity: 0; pointer-events: none; }
+#controls button {
   background: rgba(0,0,0,.6);
   color: #fff;
   border: 1px solid rgba(255,255,255,.2);
-  padding: 12px 36px;
+  padding: 12px 28px;
   border-radius: 40px;
   font-size: 1rem;
   cursor: pointer;
-  z-index: 20;
   backdrop-filter: blur(6px);
-  display: none;
-  transition: opacity .3s;
 }
-#pause-btn:hover { background: rgba(255,255,255,.15); }
-#pause-btn.hidden { opacity: 0; pointer-events: none; }
+#controls button:hover { background: rgba(255,255,255,.15); }
 #timer {
   font-size: clamp(4rem, 15vw, 8rem);
   font-weight: 800;
@@ -162,7 +165,10 @@ input:focus { border-color: #5b6af0; }
 <!-- VIEWER (hidden in admin mode) -->
 <div id="viewer">
   <video id="vid" preload="auto" playsinline muted></video>
-  <button id="pause-btn" onclick="togglePause()">⏸ Пауза</button>
+  <div id="controls">
+    <button id="pause-btn" onclick="togglePause()">⏸ Пауза</button>
+    <button id="fs-btn" onclick="toggleFullscreen()">⛶ Экран</button>
+  </div>
   <div id="overlay">
     <div class="ov-title" id="ov-title">Синхронный просмотр</div>
     <div id="timer">--:--</div>
@@ -211,22 +217,48 @@ if (vidUrl && tsParam) {
     document.addEventListener('click', unlock, { once: true });
   }
 
-  const pauseBtn = document.getElementById('pause-btn');
+  const controls = document.getElementById('controls');
   let hideTimer;
   function scheduleHideBtn() {
     clearTimeout(hideTimer);
     hideTimer = setTimeout(() => {
-      if (!vid.paused) pauseBtn.classList.add('hidden');
+      if (!vid.paused) controls.classList.add('hidden');
     }, 2500);
   }
   function showPauseBtn() {
-    pauseBtn.style.display = 'block';
+    controls.style.display = 'flex';
     scheduleHideBtn();
   }
   document.getElementById('viewer').addEventListener('click', () => {
-    pauseBtn.classList.remove('hidden');
+    controls.classList.remove('hidden');
     scheduleHideBtn();
   });
+
+  // Real fullscreen with native controls, so it behaves like a normal
+  // video player once expanded. iOS Safari has no element Fullscreen API,
+  // so it falls back to the video's own native fullscreen player.
+  function toggleFullscreen() {
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+      if (document.exitFullscreen) document.exitFullscreen();
+      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    } else if (vid.webkitEnterFullscreen) {
+      vid.webkitEnterFullscreen();
+    } else if (vid.requestFullscreen) {
+      vid.controls = true;
+      vid.requestFullscreen();
+    } else if (vid.webkitRequestFullscreen) {
+      vid.controls = true;
+      vid.webkitRequestFullscreen();
+    }
+  }
+  function onFsChange() {
+    const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    document.getElementById('fs-btn').textContent = isFs ? '⤢ Выход' : '⛶ Экран';
+    if (!isFs) vid.controls = false;
+  }
+  document.addEventListener('fullscreenchange', onFsChange);
+  document.addEventListener('webkitfullscreenchange', onFsChange);
+  window.toggleFullscreen = toggleFullscreen;
 
   function tick() {
     if (fired) return;
@@ -337,21 +369,25 @@ video{width:100%;height:100%;object-fit:contain;position:fixed;inset:0}
 .ov-sub{font-size:1rem;color:#777}
 #tmr{font-size:clamp(4rem,15vw,8rem);font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:4px;line-height:1}
 #tmr.red{color:#f87171}
-#pb{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6);color:#fff;border:1px solid rgba(255,255,255,.2);padding:12px 36px;border-radius:40px;font-size:1rem;cursor:pointer;z-index:20;backdrop-filter:blur(6px);display:none;transition:opacity .3s}
-#pb:hover{background:rgba(255,255,255,.15)}
-#pb.hidden{opacity:0;pointer-events:none}
+#ctl{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);display:none;gap:12px;z-index:20;transition:opacity .3s}
+#ctl.hidden{opacity:0;pointer-events:none}
+#ctl button{background:rgba(0,0,0,.6);color:#fff;border:1px solid rgba(255,255,255,.2);padding:12px 28px;border-radius:40px;font-size:1rem;cursor:pointer;backdrop-filter:blur(6px)}
+#ctl button:hover{background:rgba(255,255,255,.15)}
 </style>
 </head>
 <body>
 <video id="v" preload="auto" playsinline muted src="${url}"></video>
-<button id="pb" onclick="tp()">⏸ Пауза</button>
+<div id="ctl">
+  <button id="pb" onclick="tp()">⏸ Пауза</button>
+  <button id="fb" onclick="tf()">⛶ Экран</button>
+</div>
 <div id="ov">
   <div class="ov-sub" id="sub">Синхронный просмотр</div>
   <div id="tmr">--:--</div>
 </div>
 <script>
 var TS=${ts},v=document.getElementById('v'),tmr=document.getElementById('tmr'),
-    ov=document.getElementById('ov'),pb=document.getElementById('pb'),sub=document.getElementById('sub'),fired=false,hideTimer;
+    ov=document.getElementById('ov'),ctl=document.getElementById('ctl'),pb=document.getElementById('pb'),fb=document.getElementById('fb'),sub=document.getElementById('sub'),fired=false,hideTimer;
 v.load();
 sub.textContent='Синхронный просмотр · старт в '+new Date(TS).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+' (ваше время)';
 function startPlayback(){
@@ -362,20 +398,39 @@ function startPlayback(){
 }
 function scheduleHideBtn(){
   clearTimeout(hideTimer);
-  hideTimer=setTimeout(function(){if(!v.paused)pb.classList.add('hidden');},2500);
+  hideTimer=setTimeout(function(){if(!v.paused)ctl.classList.add('hidden');},2500);
 }
-document.body.addEventListener('click',function(e){if(e.target!==pb){pb.classList.remove('hidden');scheduleHideBtn();}});
+document.body.addEventListener('click',function(e){if(e.target!==pb&&e.target!==fb){ctl.classList.remove('hidden');scheduleHideBtn();}});
 function tick(){if(fired)return;
   var d=Math.ceil((TS-Date.now())/1000);
   if(d<=0){fired=true;tmr.textContent='🎬';startPlayback();
     setTimeout(function(){ov.classList.add('fade');},600);
-    setTimeout(function(){ov.style.display='none';pb.style.display='block';scheduleHideBtn();},1200);return;}
+    setTimeout(function(){ov.style.display='none';ctl.style.display='flex';scheduleHideBtn();},1200);return;}
   var hh=Math.floor(d/3600),mm=Math.floor((d%3600)/60),ss=d%60;
   tmr.textContent=hh>0?p(hh)+':'+p(mm)+':'+p(ss):p(mm)+':'+p(ss);
   tmr.classList.toggle('red',d<=10);
   setTimeout(tick,500);}
 function p(n){return('0'+n).slice(-2);}
-function tp(){if(v.paused){v.play();pb.textContent='⏸ Пауза';scheduleHideBtn();}else{v.pause();pb.textContent='▶ Продолжить';clearTimeout(hideTimer);pb.classList.remove('hidden');}}
+function tp(){if(v.paused){v.play();pb.textContent='⏸ Пауза';scheduleHideBtn();}else{v.pause();pb.textContent='▶ Продолжить';clearTimeout(hideTimer);ctl.classList.remove('hidden');}}
+function tf(){
+  if(document.fullscreenElement||document.webkitFullscreenElement){
+    if(document.exitFullscreen)document.exitFullscreen();
+    else if(document.webkitExitFullscreen)document.webkitExitFullscreen();
+  }else if(v.webkitEnterFullscreen){
+    v.webkitEnterFullscreen();
+  }else if(v.requestFullscreen){
+    v.controls=true;v.requestFullscreen();
+  }else if(v.webkitRequestFullscreen){
+    v.controls=true;v.webkitRequestFullscreen();
+  }
+}
+function onFs(){
+  var isFs=!!(document.fullscreenElement||document.webkitFullscreenElement);
+  fb.textContent=isFs?'⤢ Выход':'⛶ Экран';
+  if(!isFs)v.controls=false;
+}
+document.addEventListener('fullscreenchange',onFs);
+document.addEventListener('webkitfullscreenchange',onFs);
 tick();
 <\/script>
 </body>
