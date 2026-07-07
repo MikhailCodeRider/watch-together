@@ -121,6 +121,7 @@ input:focus { border-color: #5b6af0; }
   transition: opacity .3s;
 }
 #pause-btn:hover { background: rgba(255,255,255,.15); }
+#pause-btn.hidden { opacity: 0; pointer-events: none; }
 #timer {
   font-size: clamp(4rem, 15vw, 8rem);
   font-weight: 800;
@@ -160,7 +161,7 @@ input:focus { border-color: #5b6af0; }
 
 <!-- VIEWER (hidden in admin mode) -->
 <div id="viewer">
-  <video id="vid" preload="auto" playsinline></video>
+  <video id="vid" preload="auto" playsinline muted></video>
   <button id="pause-btn" onclick="togglePause()">⏸ Пауза</button>
   <div id="overlay">
     <div class="ov-title" id="ov-title">Синхронный просмотр</div>
@@ -173,38 +174,74 @@ input:focus { border-color: #5b6af0; }
 // ─── VIEWER LOGIC ─────────────────────────────────────────────────────────────
 const params = new URLSearchParams(location.search);
 const vidUrl  = params.get('url');
-const timeStr = params.get('t');
+const tsParam = params.get('t');
 
-if (vidUrl && timeStr) {
+if (vidUrl && tsParam) {
   document.getElementById('admin').style.display = 'none';
   document.getElementById('viewer').style.display = 'flex';
 
-  const [TH, TM] = timeStr.split(':').map(Number);
+  // Absolute UTC timestamp (ms) — timezone-independent, so it fires at the
+  // same real-world moment no matter what timezone the viewer is in.
+  const TARGET_TS = Number(tsParam);
   const vid = document.getElementById('vid');
   const timer = document.getElementById('timer');
   const overlay = document.getElementById('overlay');
 
+  document.getElementById('ov-hint').textContent =
+    'Старт в ' + new Date(TARGET_TS).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (ваше время)';
+
   vid.src = vidUrl;
+  vid.muted = true;
   vid.load();
 
   let fired = false;
 
+  // Mobile browsers block autoplay-with-sound unless it starts muted.
+  // Starting muted (always allowed) and unmuting right after playback
+  // begins lets the video start on its own, with sound, on mobile.
+  function startPlayback() {
+    const p = vid.play();
+    if (p && p.then) {
+      p.then(() => { vid.muted = false; }).catch(() => {
+        const unlock = () => { vid.muted = false; vid.play().catch(() => {}); };
+        document.addEventListener('touchend', unlock, { once: true });
+        document.addEventListener('click', unlock, { once: true });
+      });
+    } else {
+      vid.muted = false;
+    }
+  }
+
+  const pauseBtn = document.getElementById('pause-btn');
+  let hideTimer;
+  function scheduleHideBtn() {
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      if (!vid.paused) pauseBtn.classList.add('hidden');
+    }, 2500);
+  }
+  function showPauseBtn() {
+    pauseBtn.style.display = 'block';
+    scheduleHideBtn();
+  }
+  document.getElementById('viewer').addEventListener('click', () => {
+    pauseBtn.classList.remove('hidden');
+    scheduleHideBtn();
+  });
+
   function tick() {
     if (fired) return;
-    const now = new Date();
-    const target = new Date(now);
-    target.setHours(TH, TM, 0, 0);
-    const diff = Math.ceil((target - now) / 1000);
+    const diff = Math.ceil((TARGET_TS - Date.now()) / 1000);
 
     if (diff <= 0) {
       fired = true;
       timer.textContent = '🎬';
       document.getElementById('ov-title').textContent = 'Поехали!';
-      vid.play().catch(() => {});
+      startPlayback();
       setTimeout(() => { overlay.classList.add('fade'); }, 600);
       setTimeout(() => {
         overlay.style.display = 'none';
-        document.getElementById('pause-btn').style.display = 'block';
+        showPauseBtn();
       }, 1200);
       return;
     }
@@ -227,9 +264,12 @@ if (vidUrl && timeStr) {
     if (vid.paused) {
       vid.play();
       btn.textContent = '⏸ Пауза';
+      scheduleHideBtn();
     } else {
       vid.pause();
       btn.textContent = '▶ Продолжить';
+      clearTimeout(hideTimer);
+      btn.classList.remove('hidden');
     }
   }
   window.togglePause = togglePause;
@@ -247,7 +287,7 @@ function getCookie(name) {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-if (!(vidUrl && timeStr)) {
+if (!(vidUrl && tsParam)) {
   const savedUrl = getCookie('wt_url');
   if (savedUrl) document.getElementById('url').value = savedUrl;
 
@@ -263,10 +303,17 @@ function generate() {
 
   setCookie('wt_url', url, 365);
 
-  const viewerUrl = location.href.split('?')[0] + `?url=${encodeURIComponent(url)}&t=${time}`;
+  // Convert the locally-entered time into an absolute timestamp so it
+  // means the same real-world moment for a friend in another timezone.
+  const [h, m] = time.split(':').map(Number);
+  const target = new Date();
+  target.setHours(h, m, 0, 0);
+  const ts = target.getTime();
+
+  const viewerUrl = location.href.split('?')[0] + `?url=${encodeURIComponent(url)}&t=${ts}`;
 
   // Standalone HTML for download (no server needed)
-  const html = buildViewer(url, time);
+  const html = buildViewer(url, ts);
   const blob = new Blob([html], { type: 'text/html' });
   const blobUrl = URL.createObjectURL(blob);
 
@@ -275,14 +322,13 @@ function generate() {
   document.getElementById('output').style.display = 'block';
 }
 
-function buildViewer(url, time) {
-  const [h, m] = time.split(':');
+function buildViewer(url, ts) {
   return `<!DOCTYPE html>
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Watch Together — ${time}</title>
+<title>Watch Together</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#000;display:flex;align-items:center;justify-content:center;height:100vh;overflow:hidden;font-family:'Segoe UI',sans-serif;color:#fff}
@@ -292,33 +338,47 @@ video{width:100%;height:100%;object-fit:contain;position:fixed;inset:0}
 .ov-sub{font-size:1rem;color:#777}
 #tmr{font-size:clamp(4rem,15vw,8rem);font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:4px;line-height:1}
 #tmr.red{color:#f87171}
-#pb{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6);color:#fff;border:1px solid rgba(255,255,255,.2);padding:12px 36px;border-radius:40px;font-size:1rem;cursor:pointer;z-index:20;backdrop-filter:blur(6px);display:none}
+#pb{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.6);color:#fff;border:1px solid rgba(255,255,255,.2);padding:12px 36px;border-radius:40px;font-size:1rem;cursor:pointer;z-index:20;backdrop-filter:blur(6px);display:none;transition:opacity .3s}
 #pb:hover{background:rgba(255,255,255,.15)}
+#pb.hidden{opacity:0;pointer-events:none}
 </style>
 </head>
 <body>
-<video id="v" preload="auto" playsinline src="${url}"></video>
+<video id="v" preload="auto" playsinline muted src="${url}"></video>
 <button id="pb" onclick="tp()">⏸ Пауза</button>
 <div id="ov">
-  <div class="ov-sub">Синхронный просмотр · старт в ${time}</div>
+  <div class="ov-sub" id="sub">Синхронный просмотр</div>
   <div id="tmr">--:--</div>
 </div>
 <script>
-var TH=${h},TM=${m},v=document.getElementById('v'),tmr=document.getElementById('tmr'),
-    ov=document.getElementById('ov'),fired=false;
+var TS=${ts},v=document.getElementById('v'),tmr=document.getElementById('tmr'),
+    ov=document.getElementById('ov'),pb=document.getElementById('pb'),sub=document.getElementById('sub'),fired=false,hideTimer;
 v.load();
+sub.textContent='Синхронный просмотр · старт в '+new Date(TS).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+' (ваше время)';
+function startPlayback(){
+  var p=v.play();
+  if(p&&p.then){p.then(function(){v.muted=false;}).catch(function(){
+    var unlock=function(){v.muted=false;v.play().catch(function(){});};
+    document.addEventListener('touchend',unlock,{once:true});
+    document.addEventListener('click',unlock,{once:true});
+  });}else{v.muted=false;}
+}
+function scheduleHideBtn(){
+  clearTimeout(hideTimer);
+  hideTimer=setTimeout(function(){if(!v.paused)pb.classList.add('hidden');},2500);
+}
+document.body.addEventListener('click',function(e){if(e.target!==pb){pb.classList.remove('hidden');scheduleHideBtn();}});
 function tick(){if(fired)return;
-  var now=new Date(),t=new Date(now);t.setHours(TH,TM,0,0);
-  var d=Math.ceil((t-now)/1000);
-  if(d<=0){fired=true;tmr.textContent='🎬';v.play().catch(function(){});
+  var d=Math.ceil((TS-Date.now())/1000);
+  if(d<=0){fired=true;tmr.textContent='🎬';startPlayback();
     setTimeout(function(){ov.classList.add('fade');},600);
-    setTimeout(function(){ov.style.display='none';document.getElementById('pb').style.display='block';},1200);return;}
+    setTimeout(function(){ov.style.display='none';pb.style.display='block';scheduleHideBtn();},1200);return;}
   var hh=Math.floor(d/3600),mm=Math.floor((d%3600)/60),ss=d%60;
   tmr.textContent=hh>0?p(hh)+':'+p(mm)+':'+p(ss):p(mm)+':'+p(ss);
   tmr.classList.toggle('red',d<=10);
   setTimeout(tick,500);}
 function p(n){return('0'+n).slice(-2);}
-function tp(){var pb=document.getElementById('pb');if(v.paused){v.play();pb.textContent='⏸ Пауза';}else{v.pause();pb.textContent='▶ Продолжить';}}
+function tp(){if(v.paused){v.play();pb.textContent='⏸ Пауза';scheduleHideBtn();}else{v.pause();pb.textContent='▶ Продолжить';clearTimeout(hideTimer);pb.classList.remove('hidden');}}
 tick();
 <\/script>
 </body>
