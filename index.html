@@ -196,20 +196,19 @@ if (vidUrl && tsParam) {
 
   let fired = false;
 
-  // Mobile browsers block autoplay-with-sound unless it starts muted.
-  // Starting muted (always allowed) and unmuting right after playback
-  // begins lets the video start on its own, with sound, on mobile.
+  // Muted autoplay is always allowed, so play muted first — that part
+  // never needs a gesture. Unmuting must happen inside a real click/tap,
+  // though: if we unmute programmatically right after autoplay succeeds
+  // (no gesture behind it), Chrome silently re-pauses the video. So sound
+  // only turns on once the viewer actually taps/clicks the page.
   function startPlayback() {
-    const p = vid.play();
-    if (p && p.then) {
-      p.then(() => { vid.muted = false; }).catch(() => {
-        const unlock = () => { vid.muted = false; vid.play().catch(() => {}); };
-        document.addEventListener('touchend', unlock, { once: true });
-        document.addEventListener('click', unlock, { once: true });
-      });
-    } else {
+    vid.play().catch(() => {});
+    const unlock = () => {
       vid.muted = false;
-    }
+      if (vid.paused) vid.play().catch(() => {});
+    };
+    document.addEventListener('touchend', unlock, { once: true });
+    document.addEventListener('click', unlock, { once: true });
   }
 
   const pauseBtn = document.getElementById('pause-btn');
@@ -356,12 +355,10 @@ var TS=${ts},v=document.getElementById('v'),tmr=document.getElementById('tmr'),
 v.load();
 sub.textContent='Синхронный просмотр · старт в '+new Date(TS).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+' (ваше время)';
 function startPlayback(){
-  var p=v.play();
-  if(p&&p.then){p.then(function(){v.muted=false;}).catch(function(){
-    var unlock=function(){v.muted=false;v.play().catch(function(){});};
-    document.addEventListener('touchend',unlock,{once:true});
-    document.addEventListener('click',unlock,{once:true});
-  });}else{v.muted=false;}
+  v.play().catch(function(){});
+  var unlock=function(){v.muted=false;if(v.paused)v.play().catch(function(){});};
+  document.addEventListener('touchend',unlock,{once:true});
+  document.addEventListener('click',unlock,{once:true});
 }
 function scheduleHideBtn(){
   clearTimeout(hideTimer);
